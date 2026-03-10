@@ -4,8 +4,9 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer, util
+from rapidfuzz import process, utils
 
-st.set_page_config(page_title="Boardgame Search", page_icon="🎲", layout="wide")
+st.set_page_config(page_title="Boardgame Search Engine", page_icon="🎲", layout="wide")
 
 @st.cache_resource
 def load_models():
@@ -39,16 +40,23 @@ def get_embeddings(_df_content):
 
 embeddings = get_embeddings(df['content'])
 
-st.sidebar.title("🎯 Filters")
-num_players = st.sidebar.number_input("Players", min_value=1, max_value=10, value=2)
-max_time = st.sidebar.slider("Max Playing Time (min)", min_value=15, max_value=240, value=90, step=15)
+st.sidebar.title("🎯 Search Filters")
+num_players = st.sidebar.number_input("Target Players", min_value=1, max_value=10, value=2)
+max_time = st.sidebar.slider("Max Time (min)", min_value=15, max_value=240, value=90, step=15)
 
-st.title("🎲 Boardgame Search")
+st.title("🎲 Boardgame Smart Search")
+st.markdown("Find your next game using **AI-powered Hybrid Search**")
 
-query = st.text_input("🔍 Search for games:")
+query = st.text_input("🔍 What kind of game are you looking for?", placeholder="e.g., Bird game, War in space, เกมวางแผน...")
 
 if query:
-    with st.spinner('Searching...'):
+    game_names = df['name'].tolist()
+    suggestion = process.extractOne(query, game_names, processor=utils.default_process)
+    
+    if suggestion and 70 < suggestion[1] < 95:
+        st.info(f"💡 Did you mean: **{suggestion[0]}**?")
+
+    with st.spinner('Analyzing query and ranking results...'):
         tfidf = TfidfVectorizer(stop_words='english')
         tfidf_matrix = tfidf.fit_transform(df['content'])
         query_vec = tfidf.transform([query])
@@ -63,23 +71,29 @@ if query:
                (df['maxplayers'] >= num_players) & \
                (df['playingtime'] <= max_time)
         
-        filtered_df = df[mask].copy()
-        results = filtered_df.sort_values(by='final_score', ascending=False).head(10)
+        results = df[mask].sort_values(by='final_score', ascending=False).head(10)
 
     if not results.empty:
+        st.success(f"Found {len(results)} games matching your criteria.")
         for i, row in results.iterrows():
             with st.container():
                 col1, col2 = st.columns([1, 4])
                 with col1:
                     img_url = row.get('thumbnail', "https://via.placeholder.com/150")
                     st.image(img_url)
-                    st.metric("Match", f"{int(row['final_score']*100)}%")
+                    score_pct = int(row['final_score'] * 100)
+                    st.metric("Relevance", f"{score_pct}%")
                 with col2:
                     st.subheader(row['name'])
-                    st.write(f"👥 Players: {int(row['minplayers'])}-{int(row['maxplayers'])} | ⏳ Time: {int(row['playingtime'])} min")
-                    st.write(f"🎭 Categories: {row['categories']}")
-                    with st.expander("More Details"):
+                    st.write(f"👥 **Players:** {int(row['minplayers'])}-{int(row['maxplayers'])} | ⏳ **Time:** {int(row['playingtime'])} min")
+                    st.write(f"🎭 **Categories:** {row['categories']}")
+                    with st.expander("Read Description"):
                         st.write(row['description'])
                 st.markdown("---")
     else:
-        st.warning("No games found matching your criteria. Please try adjusting the filters.")
+        st.warning("No games found. Try adjusting your filters or search terms.")
+
+with st.sidebar.expander("🛠️ System Architecture"):
+    st.write("- **Lexical:** TF-IDF (Scikit-learn)")
+    st.write("- **Semantic:** Multilingual Transformer")
+    st.write("- **Fuzzy:** RapidFuzz (Levenshtein)")
