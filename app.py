@@ -79,6 +79,7 @@ if query:
                     with col2:
                         st.subheader(row['name'])
                         st.write(f"👥 {int(row['minplayers'])}-{int(row['maxplayers'])} คน | ⏳ {int(row['playingtime'])} นาที")
+                        st.write(f"🎭 {row['categories']}")
                         with st.expander("รายละเอียด"):
                             st.write(row['description'])
                     st.markdown("---")
