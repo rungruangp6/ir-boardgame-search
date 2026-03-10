@@ -92,8 +92,3 @@ if query:
                 st.markdown("---")
     else:
         st.warning("No games found. Try adjusting your filters or search terms.")
-
-with st.sidebar.expander("🛠️ System Architecture"):
-    st.write("- **Lexical:** TF-IDF (Scikit-learn)")
-    st.write("- **Semantic:** Multilingual Transformer")
-    st.write("- **Fuzzy:** RapidFuzz (Levenshtein)")
