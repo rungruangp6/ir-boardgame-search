@@ -66,16 +66,16 @@ if query:
         all_results = df[mask].sort_values(by='final_score', ascending=False).head(15)
 
     if not all_results.empty:
-        main_col, side_col = st.columns([7, 3])
+        main_col, side_col = st.columns([8.5, 1.5])
 
         with main_col:
             st.success(f"✅ ผลลัพธ์การค้นหาสำหรับ: '{query}'")
             for i, row in all_results.head(10).iterrows():
                 with st.container():
-                    col1, col2 = st.columns([1, 3])
+                    col1, col2 = st.columns([1, 4])
                     with col1:
                         st.image(row.get('thumbnail', "https://via.placeholder.com/150"))
-                        st.metric("Match", f"{int(row['final_score'] * 100)}%")
+                        st.caption(f"Match: {int(row['final_score'] * 100)}%")
                     with col2:
                         st.subheader(row['name'])
                         st.write(f"👥 {int(row['minplayers'])}-{int(row['maxplayers'])} คน | ⏳ {int(row['playingtime'])} นาที")
@@ -84,10 +84,10 @@ if query:
                     st.markdown("---")
 
         with side_col:
-            st.subheader("✨ ผลลัพธ์ที่อาจถูกใจ")
+            st.markdown("##### ✨ อาจถูกใจ")
             for i, row in all_results.iloc[10:15].iterrows():
-                with st.expander(f"🎲 {row['name']}", expanded=True):
-                    st.image(row.get('thumbnail', "https://via.placeholder.com/150"), use_container_width=True)
-                    st.caption(f"Match: {int(row['final_score'] * 100)}%")
+                st.image(row.get('thumbnail', "https://via.placeholder.com/150"), use_container_width=True)
+                st.caption(f"**{row['name']}**")
+                st.divider()
     else:
         st.warning("ไม่พบเกมที่ตรงตามเงื่อนไข กรุณาลองปรับฟิลเตอร์ใหม่")
