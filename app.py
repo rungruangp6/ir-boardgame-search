@@ -38,7 +38,7 @@ max_time = st.sidebar.slider("Max Time (min)", min_value=15, max_value=240, valu
 st.title("🎲 Boardgame Smart Search")
 st.markdown("AI-powered Hybrid Search (Support Thai & English)")
 
-query = st.text_input("🔍 Search for board games", placeholder="เช่น ซอมบี้, เกมทำฟาร์ม, Space war, Card games...")
+query = st.text_input("🔍 Search for board games", placeholder="e.g., War game, Farming, ซอมบี้, เกมการ์ด...")
 
 if query:
     try:
@@ -57,30 +57,37 @@ if query:
         tfidf_matrix = tfidf.fit_transform(df['content'])
         query_vec = tfidf.transform([expanded_query])
         lexical_scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
-
         query_embedding = model.encode(expanded_query, convert_to_tensor=True)
         semantic_scores = util.cos_sim(query_embedding, embeddings).cpu().numpy().flatten()
-
-        df['final_score'] = (lexical_scores * 0.4) + (semantic_scores * 0.6)
         
+        df['final_score'] = (lexical_scores * 0.4) + (semantic_scores * 0.6)
         mask = (df['minplayers'] <= num_players) & (df['maxplayers'] >= num_players) & (df['playingtime'] <= max_time)
-        results = df[mask].sort_values(by='final_score', ascending=False).head(10)
+        
+        all_results = df[mask].sort_values(by='final_score', ascending=False).head(15)
 
-    if not results.empty:
-        st.success(f"Top 10 games for: '{query}'")
-        for i, row in results.iterrows():
-            with st.container():
-                col1, col2 = st.columns([1, 4])
-                with col1:
-                    st.image(row.get('thumbnail', "https://via.placeholder.com/150"))
-                    score_pct = int(row['final_score'] * 100)
-                    st.metric("Match", f"{score_pct}%")
-                with col2:
-                    st.subheader(row['name'])
-                    st.write(f"👥 **Players:** {int(row['minplayers'])}-{int(row['maxplayers'])} | ⏳ **Time:** {int(row['playingtime'])} min")
-                    st.write(f"🎭 **Categories:** {row['categories']}")
-                    with st.expander("Read More"):
-                        st.write(row['description'])
-                st.markdown("---")
+    if not all_results.empty:
+        main_col, side_col = st.columns([7, 3])
+
+        with main_col:
+            st.success(f"✅ ผลลัพธ์การค้นหาสำหรับ: '{query}'")
+            for i, row in all_results.head(10).iterrows():
+                with st.container():
+                    col1, col2 = st.columns([1, 3])
+                    with col1:
+                        st.image(row.get('thumbnail', "https://via.placeholder.com/150"))
+                        st.metric("Match", f"{int(row['final_score'] * 100)}%")
+                    with col2:
+                        st.subheader(row['name'])
+                        st.write(f"👥 {int(row['minplayers'])}-{int(row['maxplayers'])} คน | ⏳ {int(row['playingtime'])} นาที")
+                        with st.expander("รายละเอียด"):
+                            st.write(row['description'])
+                    st.markdown("---")
+
+        with side_col:
+            st.subheader("✨ ผลลัพธ์ที่อาจถูกใจ")
+            for i, row in all_results.iloc[10:15].iterrows():
+                with st.expander(f"🎲 {row['name']}", expanded=True):
+                    st.image(row.get('thumbnail', "https://via.placeholder.com/150"), use_container_width=True)
+                    st.caption(f"Match: {int(row['final_score'] * 100)}%")
     else:
-        st.warning("No games found. Try adjusting your filters.")
+        st.warning("ไม่พบเกมที่ตรงตามเงื่อนไข กรุณาลองปรับฟิลเตอร์ใหม่")
