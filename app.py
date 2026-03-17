@@ -79,7 +79,7 @@ else:
 num_players = st.sidebar.number_input("👤 Number of Players", min_value=1, max_value=10, value=4)
 max_time = st.sidebar.slider("⏳ Max Time (Minutes)", 15, 240, 120, 15)
 
-st.title("🎲 Boardgame Smart IR Engine")
+st.title("🎲 Boardgame IR Engine")
 
 query = st.text_input(
     "🔍 Search for board games (Supports Thai & English)", 
