@@ -1,94 +1,156 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import cloudscraper
+import re
+from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer, util
-from rapidfuzz import process, utils
 from deep_translator import GoogleTranslator
+from pythainlp.tokenize import word_tokenize
+from pythainlp.corpus import thai_stopwords
 
-st.set_page_config(page_title="Boardgame Search Engine", page_icon="🎲", layout="wide")
+st.set_page_config(page_title="Boardgame IR System", page_icon="🎲", layout="wide")
 
 @st.cache_resource
 def load_models():
     return SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 
 @st.cache_data
-def load_data():
-    df = pd.read_excel('bgg_top500_all.xlsx').fillna(0)
+def load_master_data():
+    df = pd.read_excel('bgg_top500_all.xlsx').fillna("")
     df.columns = df.columns.str.strip().str.lower()
-    rename_dict = {'min_players': 'minplayers', 'max_players': 'maxplayers', 'playing_time': 'playingtime'}
+    rename_dict = {
+        'min_players': 'minplayers', 
+        'max_players': 'maxplayers', 
+        'playing_time': 'playingtime'
+    }
     df = df.rename(columns=rename_dict)
-    df['content'] = df['name'].astype(str) + " " + df['description'].astype(str) + " " + df['categories'].astype(str)
     return df
 
 model = load_models()
-df = load_data()
+master_df = load_master_data()
 
-@st.cache_data
-def get_embeddings(_df_content):
-    return model.encode(_df_content.tolist(), convert_to_tensor=True)
+def get_live_bgg_data():
+    scraper = cloudscraper.create_scraper(
+        browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
+    )
+    live_list = []
+    status = {"success": False, "count": 0, "error": ""}
+    try:
+        url = "https://boardgamegeek.com/browse/boardgame"
+        resp = scraper.get(url, timeout=15)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.content, "html.parser")
+            rows = soup.find_all("tr", id=lambda x: x and x.startswith('row_'))
+            for row in rows:
+                obj_cell = row.find("td", class_="collection_objectname")
+                if obj_cell:
+                    name_tag = obj_cell.find("a", class_="primary")
+                    if name_tag:
+                        clean_name = name_tag.get_text().strip().split(' (')[0]
+                        all_text = obj_cell.get_text(separator="|").split("|")
+                        potential_desc = [
+                            t.strip() for t in all_text 
+                            if len(t.strip()) > 15 and clean_name not in t
+                        ]
+                        live_desc = potential_desc[0] if potential_desc else ""
+                        live_list.append({"name": clean_name, "desc": live_desc})
+            status["success"] = True
+            status["count"] = len(live_list)
+    except Exception as e:
+        status["error"] = str(e)
+    return live_list, status
 
-embeddings = get_embeddings(df['content'])
+if 'live_data' not in st.session_state:
+    with st.spinner('🔄 Syncing...'):
+        data, stat = get_live_bgg_data()
+        st.session_state.live_data = data
+        st.session_state.sync_status = stat
 
-st.sidebar.title("🎯 Search Filters")
-num_players = st.sidebar.number_input("Target Players", min_value=1, max_value=10, value=2)
-max_time = st.sidebar.slider("Max Time (min)", min_value=15, max_value=240, value=90, step=15)
+st.sidebar.title("📊 Control Panel")
 
-st.title("🎲 Boardgame Smart Search")
-st.markdown("AI-powered Hybrid Search (Support Thai & English)")
+if st.session_state.sync_status["success"]:
+    st.sidebar.success("✅ Sync Successful")
+else:
+    st.sidebar.error("❌ Sync Failed")
 
-query = st.text_input("🔍 Search for board games", placeholder="e.g., War game, Farming, ซอมบี้, เกมการ์ด...")
+num_players = st.sidebar.number_input("👤 Number of Players", min_value=1, max_value=10, value=4)
+max_time = st.sidebar.slider("⏳ Max Time (Minutes)", 15, 240, 120, 15)
+
+st.title("🎲 Boardgame Smart IR Engine")
+
+query = st.text_input(
+    "🔍 Search for board games (Supports Thai & English)", 
+    placeholder="e.g. 'Build networks' or 'เกมวางแผนอวกาศ'..."
+)
 
 if query:
-    try:
-        translated = GoogleTranslator(source='auto', target='en').translate(query)
-        expanded_query = f"{query} {translated}"
-    except:
-        expanded_query = query
+    is_thai = bool(re.search('[ก-๙]', query))
+    if is_thai:
+        th_stops = list(thai_stopwords()) + ['เกม', 'เล่น', 'อยาก', 'ที่มี', 'แบบ', 'เอา']
+        tokens = word_tokenize(query, engine='newmm')
+        clean_query_th = " ".join([w for w in tokens if w not in th_stops and w.strip() != ""])
+        try:
+            translated = GoogleTranslator(source='auto', target='en').translate(clean_query_th)
+        except:
+            translated = query
+    else:
+        translated = query
 
-    game_names = df['name'].tolist()
-    suggestion = process.extractOne(query, game_names, processor=utils.default_process)
-    if suggestion and 75 < suggestion[1] < 95:
-        st.info(f"💡 Did you mean: **{suggestion[0]}**?")
+    mask = (master_df['minplayers'] <= num_players) & \
+           (master_df['maxplayers'] >= num_players) & \
+           (master_df['playingtime'] <= max_time)
+    filtered_df = master_df[mask].copy()
 
-    with st.spinner('Ranking results...'):
-        tfidf = TfidfVectorizer(stop_words='english')
-        tfidf_matrix = tfidf.fit_transform(df['content'])
-        query_vec = tfidf.transform([expanded_query])
-        lexical_scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
-        query_embedding = model.encode(expanded_query, convert_to_tensor=True)
-        semantic_scores = util.cos_sim(query_embedding, embeddings).cpu().numpy().flatten()
-        
-        df['final_score'] = (lexical_scores * 0.4) + (semantic_scores * 0.6)
-        mask = (df['minplayers'] <= num_players) & (df['maxplayers'] >= num_players) & (df['playingtime'] <= max_time)
-        
-        all_results = df[mask].sort_values(by='final_score', ascending=False).head(15)
+    matched_names = [
+        item['name'] for item in st.session_state.live_data 
+        if translated.lower() in item['desc'].lower() or query.lower() in item['desc'].lower()
+    ]
 
-    if not all_results.empty:
-        main_col, side_col = st.columns([8.5, 1.5])
+    if not filtered_df.empty:
+        with st.spinner('🚀 Searching...'):
+            filtered_df['content'] = filtered_df['name'] + " " + filtered_df['description']
+            
+            tfidf = TfidfVectorizer(stop_words='english')
+            tfidf_matrix = tfidf.fit_transform(filtered_df['content'])
+            query_vec = tfidf.transform([translated])
+            lex_scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
 
-        with main_col:
-            st.success(f"✅ ผลลัพธ์การค้นหาสำหรับ: '{query}'")
-            for i, row in all_results.head(10).iterrows():
+            query_emb = model.encode(translated, convert_to_tensor=True)
+            doc_embs = model.encode(filtered_df['content'].tolist(), convert_to_tensor=True)
+            sem_scores = util.cos_sim(query_emb, doc_embs).cpu().numpy().flatten()
+
+            filtered_df['lex_score'] = lex_scores
+            filtered_df['sem_score'] = sem_scores
+            filtered_df['ir_score'] = (lex_scores * 0.4) + (sem_scores * 0.6)
+
+            primary = filtered_df[filtered_df['name'].isin(matched_names)].copy()
+            if not primary.empty:
+                primary['final_rank'] = primary['ir_score'] + 1.0 
+            
+            fallback = filtered_df[~filtered_df['name'].isin(matched_names)].copy()
+            fallback['final_rank'] = fallback['ir_score']
+
+            final_results = pd.concat([primary, fallback]).sort_values('final_rank', ascending=False).head(15)
+
+            st.write(f"### 📋 Recommendations for {num_players} Players")
+            
+            for i, row in final_results.iterrows():
                 with st.container():
                     col1, col2 = st.columns([1, 4])
                     with col1:
-                        st.image(row.get('thumbnail', "https://via.placeholder.com/150"))
-                        st.caption(f"Match: {int(row['final_score'] * 100)}%")
+                        img_url = row.get('thumbnail') if row.get('thumbnail') != 0 else "https://via.placeholder.com/150"
+                        st.image(img_url)
                     with col2:
                         st.subheader(row['name'])
-                        st.write(f"👥 {int(row['minplayers'])}-{int(row['maxplayers'])} คน | ⏳ {int(row['playingtime'])} นาที")
-                        st.write(f"🎭 {row['categories']}")
-                        with st.expander("รายละเอียด"):
+                        st.write(f"👥 {int(row['minplayers'])}-{int(row['maxplayers'])} Players | ⏳ {int(row['playingtime'])} Minutes")
+                        with st.expander("Read description"):
                             st.write(row['description'])
-                    st.markdown("---")
-
-        with side_col:
-            st.markdown("##### ✨ อาจถูกใจ")
-            for i, row in all_results.iloc[10:15].iterrows():
-                st.image(row.get('thumbnail', "https://via.placeholder.com/150"), use_container_width=True)
-                st.caption(f"**{row['name']}**")
+                        
+                        match_percent = int(row['ir_score'] * 100)
+                        st.write(f"📊 **Match Score:** {match_percent}%")
                 st.divider()
     else:
-        st.warning("ไม่พบเกมที่ตรงตามเงื่อนไข กรุณาลองปรับฟิลเตอร์ใหม่")
+        st.error(f"❌ No games found for {num_players} players.")
