@@ -1,8 +1,9 @@
-streamlit
 pandas
-openpyxl
+numpy
+cloudscraper
+beautifulsoup4
 scikit-learn
 sentence-transformers
-torch
-rapidfuzz
 deep-translator
+pythainlp
+openpyxl
